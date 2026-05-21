@@ -58,7 +58,39 @@ on:
         options:
           - "off"
           - "on"
-        default: "off"
+        default: "on"
+      htsr:
+        description: "HTSR 240Hz Touch Sampling"
+        required: true
+        type: choice
+        options:
+          - "off"
+          - "on"
+        default: "on"
+      wifi_exploit:
+        description: "WiFi Performance Exploits (WLM, Coex, BBR)"
+        required: true
+        type: choice
+        options:
+          - "off"
+          - "on"
+        default: "on"
+      kgsl_exploit:
+        description: "KGSL GPU Bypass (LM_LIMIT, DCVS)"
+        required: true
+        type: choice
+        options:
+          - "off"
+          - "on"
+        default: "on"
+      data_exploit:
+        description: "Mobile Data Exploits (DFC, Powersave)"
+        required: true
+        type: choice
+        options:
+          - "off"
+          - "on"
+        default: "on"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -78,6 +110,10 @@ jobs:
           INPUT_KPM: ${{ inputs.kpm }}
           INPUT_HARDENED: ${{ inputs.hardened }}
           INPUT_BYPASS: ${{ inputs.bypasscharging }}
+          INPUT_HTSR: ${{ inputs.htsr }}
+          INPUT_WIFI: ${{ inputs.wifi_exploit }}
+          INPUT_KGSL: ${{ inputs.kgsl_exploit }}
+          INPUT_DATA: ${{ inputs.data_exploit }}
         run: |
           if [ "$INPUT_HZ" == "powersave" ]; then HZ_ID=100
           elif [ "$INPUT_HZ" == "balance" ]; then HZ_ID=250
@@ -103,6 +139,10 @@ jobs:
           fi
           if [ "$INPUT_HARDENED" == "on" ]; then BUILD_NAME="${BUILD_NAME}-hardened"; fi
           if [ "$INPUT_BYPASS" == "on" ]; then BUILD_NAME="${BUILD_NAME}-bypasscharging"; fi
+          if [ "$INPUT_HTSR" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nohtsr"; fi
+          if [ "$INPUT_WIFI" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nowifi"; fi
+          if [ "$INPUT_KGSL" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nokgsl"; fi
+          if [ "$INPUT_DATA" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nodata"; fi
           
           echo "BUILD_NAME=$BUILD_NAME" >> $GITHUB_ENV
           
@@ -146,6 +186,10 @@ jobs:
           INPUT_VARIANT: ${{ inputs.variant }}
           INPUT_KPM: ${{ inputs.kpm }}
           INPUT_HARDENED: ${{ inputs.hardened }}
+          INPUT_HTSR: ${{ inputs.htsr }}
+          INPUT_WIFI: ${{ inputs.wifi_exploit }}
+          INPUT_KGSL: ${{ inputs.kgsl_exploit }}
+          INPUT_DATA: ${{ inputs.data_exploit }}
           INPUT_BYPASS: ${{ inputs.bypasscharging }}
         run: |
           cd gki-clo
@@ -175,6 +219,10 @@ jobs:
             kpm_patch="$KPM_PATCH" \
             hardened="$INPUT_HARDENED" \
             bypasscharging="$INPUT_BYPASS" \
+            htsr="$INPUT_HTSR" \
+            wifi_exploit="$INPUT_WIFI" \
+            kgsl_exploit="$INPUT_KGSL" \
+            data_exploit="$INPUT_DATA" \
             lto="$LTO_VAL"
 
       - name: Upload Artifact
@@ -214,7 +262,15 @@ jobs:
             Root: **${{ inputs.root }}**
             KPM: **${{ inputs.kpm }}**
             Hardened: **${{ inputs.hardened }}**
-            Bypass Charging: **${{ inputs.bypasscharging }}**
+            
+            ### Performance Mods
+            | Feature | Status |
+            |---------|--------|
+            | Bypass Charging | **${{ inputs.bypasscharging }}** |
+            | HTSR 240Hz Touch | **${{ inputs.htsr }}** |
+            | WiFi Exploits | **${{ inputs.wifi_exploit }}** |
+            | KGSL GPU Bypass | **${{ inputs.kgsl_exploit }}** |
+            | Data Exploits | **${{ inputs.data_exploit }}** |
             
             Commit: ${{ github.sha }}
             Ref: ${{ github.ref }}
