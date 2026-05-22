@@ -182,8 +182,9 @@ jobs:
                           print(a['browser_download_url'])
                           exit()
           ")
+          echo "Toolchain: $URL"
           curl -L "$URL" -o toolchains/clang.tar.gz
-          tar -xzf toolchains/clang.tar.gz -C toolchains/clang --strip-components=1
+          tar -xzf toolchains/clang.tar.gz -C toolchains/clang
           rm toolchains/clang.tar.gz
           toolchains/clang/bin/clang --version
 
