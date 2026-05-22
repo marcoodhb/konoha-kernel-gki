@@ -12,7 +12,7 @@ set -e
 #   kpm_superkey=STRING   KPM SuperKey (required if kpm=on)
 #   kpm_patch=on|off      Inject kpimg with kptools (default: on; resukisu defaults off)
 #   lto=thin|full|none    LTO type (default: thin)
-#   autofdo=on|off        AutoFDO (default: off)
+#   autofdo=on|off        AutoFDO (default: on)
 # ==========================================
 
 VERSION="1.1"
@@ -169,6 +169,7 @@ fi
 [ -z "$WIFI_EXPLOIT" ] && WIFI_EXPLOIT="on"
 [ -z "$KGSL_EXPLOIT" ] && KGSL_EXPLOIT="on"
 [ -z "$DATA_EXPLOIT" ] && DATA_EXPLOIT="on"
+[ -z "$AUTOFDO" ] && AUTOFDO="on"
 
 
 # ==========================================
@@ -183,37 +184,7 @@ case "$ROOT" in
     *)        ROOT_REPO="https://github.com/KernelSU-Next/KernelSU-Next.git"; REPO_NAME="KernelSU-Next"; BRANCH="dev"; ROOT="ksu-next" ;;
 esac
 
-# ==========================================
-# Print Config Summary
-# ==========================================
-echo ""
-echo "=========================================="
-echo "          Build Configuration             "
-echo "=========================================="
-echo " Timer:     ${HZ} HZ"
-echo " Hardened:  ${HARDENED^^}"
-echo " Bypass:    ${BYPASSCHARGING^^}"
-echo " HTSR 240Hz: ${HTSR^^}"
-echo " WiFi Exploit: ${WIFI_EXPLOIT^^}"
-echo " KGSL Exploit: ${KGSL_EXPLOIT^^}"
-echo " Data Exploit: ${DATA_EXPLOIT^^}"
-[ "$VARIANT" != "stock" ] && echo " Variant:   ${VARIANT} ($REPO_NAME)" || echo " Variant:   stock"
-echo " LTO:       ${LTO_TYPE^^}"
-if [ "$VARIANT" != "stock" ]; then
-    _ROOT_COMMIT=$(git -C "$MODULES_DIR/$REPO_NAME" rev-parse --short HEAD 2>/dev/null || echo "n/a")
-    echo " Root:      $REPO_NAME @ $_ROOT_COMMIT"
-fi
-if [ "$VARIANT" == "susfs" ]; then
-    _SUSFS_COMMIT=$(git -C "$MODULES_DIR/susfs4ksu" rev-parse --short HEAD 2>/dev/null || echo "n/a")
-    echo " SUSFS:     susfs4ksu @ $_SUSFS_COMMIT"
-fi
-if [ "$KPM" == "on" ]; then
-    echo " KPM:       ENABLED"
-    echo " KPM Patch: ${KPM_PATCH^^}"
-    echo " SuperKey:  ${KPM_SUPERKEY:0:4}****"
-fi
-echo "=========================================="
-echo ""
+
 
 # ==========================================
 # Prepare Root Module
@@ -327,6 +298,38 @@ if [ "$VARIANT" == "susfs" ] && [ "$VARIANT" != "stock" ]; then
     echo "[+] Running SUSFS compatibility fixup ($ROOT)..."
     bash "$KERNEL_DIR/ksu_susfs_fixup.sh" "$KERNEL_DIR/drivers/kernelsu" "$ROOT"
 fi
+
+# ==========================================
+# Print Config Summary
+# ==========================================
+echo ""
+echo "=========================================="
+echo "          Build Configuration             "
+echo "=========================================="
+echo " Timer:     ${HZ} HZ"
+echo " Hardened:  ${HARDENED^^}"
+echo " Bypass:    ${BYPASSCHARGING^^}"
+echo " HTSR 240Hz: ${HTSR^^}"
+echo " WiFi Exploit: ${WIFI_EXPLOIT^^}"
+echo " KGSL Exploit: ${KGSL_EXPLOIT^^}"
+echo " Data Exploit: ${DATA_EXPLOIT^^}"
+[ "$VARIANT" != "stock" ] && echo " Variant:   ${VARIANT} ($REPO_NAME)" || echo " Variant:   stock"
+echo " LTO:       ${LTO_TYPE^^}"
+if [ "$VARIANT" != "stock" ]; then
+    _ROOT_COMMIT=$(git -C "$MODULES_DIR/$REPO_NAME" rev-parse --short HEAD 2>/dev/null || echo "n/a")
+    echo " Root:      $REPO_NAME @ $_ROOT_COMMIT"
+fi
+if [ "$VARIANT" == "susfs" ]; then
+    _SUSFS_COMMIT=$(git -C "$MODULES_DIR/susfs4ksu" rev-parse --short HEAD 2>/dev/null || echo "n/a")
+    echo " SUSFS:     susfs4ksu @ $_SUSFS_COMMIT"
+fi
+if [ "$KPM" == "on" ]; then
+    echo " KPM:       ENABLED"
+    echo " KPM Patch: ${KPM_PATCH^^}"
+    echo " SuperKey:  ${KPM_SUPERKEY:0:4}****"
+fi
+echo "=========================================="
+echo ""
 
 # ==========================================
 # KPM Tools Setup (kptools + kpimg)

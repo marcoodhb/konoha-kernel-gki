@@ -21,7 +21,10 @@
    SOFTWARE IS DISCLAIMED.
 */
 
+#include <linux/mutex.h>
 #include <asm/unaligned.h>
+
+DEFINE_MUTEX(mgmt_pending_list_lock);
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
@@ -296,6 +299,52 @@ void mgmt_pending_remove(struct mgmt_pending_cmd *cmd)
 {
 	list_del(&cmd->list);
 	mgmt_pending_free(cmd);
+}
+
+bool __mgmt_pending_listed(struct hci_dev *hdev, struct mgmt_pending_cmd *cmd)
+{
+	struct mgmt_pending_cmd *tmp;
+
+	lockdep_assert_held(&mgmt_pending_list_lock);
+
+	if (!cmd)
+		return false;
+
+	list_for_each_entry(tmp, &hdev->mgmt_pending, list) {
+		if (cmd == tmp)
+			return true;
+	}
+
+	return false;
+}
+
+bool mgmt_pending_listed(struct hci_dev *hdev, struct mgmt_pending_cmd *cmd)
+{
+	bool listed;
+
+	mutex_lock(&mgmt_pending_list_lock);
+	listed = __mgmt_pending_listed(hdev, cmd);
+	mutex_unlock(&mgmt_pending_list_lock);
+
+	return listed;
+}
+
+bool mgmt_pending_valid(struct hci_dev *hdev, struct mgmt_pending_cmd *cmd)
+{
+	bool listed;
+
+	if (!cmd)
+		return false;
+
+	mutex_lock(&mgmt_pending_list_lock);
+
+	listed = __mgmt_pending_listed(hdev, cmd);
+	if (listed)
+		list_del(&cmd->list);
+
+	mutex_unlock(&mgmt_pending_list_lock);
+
+	return listed;
 }
 
 void mgmt_mesh_foreach(struct hci_dev *hdev,
