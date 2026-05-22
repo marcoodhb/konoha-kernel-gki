@@ -2648,7 +2648,6 @@ static void mca_live_patch(struct module *mod)
 		strcmp(mod->name, "mca_strategy_fg_comp") != 0 &&
 		strcmp(mod->name, "mca_strategy_quickchg") != 0 &&
 		strcmp(mod->name, "mca_strategy_buckchg") != 0 &&
-		strcmp(mod->name, "perfmgr") != 0 &&
 		strcmp(mod->name, "xiaomi_touch") != 0) {
 		return;
 	}
@@ -2697,18 +2696,6 @@ static void mca_live_patch(struct module *mod)
 				break;
 		}
 		pr_info("MCA bypass: mca_smart_charge dynamically patched (turbo:%d night:%d timeout:%d bypass:%d)\n", patched_turbo, patched_night, patched_timeout, patched_bypass);
-	}
-	else if (strcmp(mod->name, "perfmgr") == 0) {
-		bool patched_enable = false;
-		for (i = 0; i < (text_size / 4) - 2; i++) {
-			/* perfmgr_is_enable: force to 1 (Always Active) */
-			if (!patched_enable && text[i] == 0xd503233f && text[i+1] == 0x90000008 && text[i+2] == 0x39400100) {
-				aarch64_insn_patch_text_nosync((void *)&text[i], 0x52800020);
-				aarch64_insn_patch_text_nosync((void *)&text[i+1], 0xd65f03c0);
-				patched_enable = true;
-			}
-		}
-		pr_info("Performance bypass: perfmgr dynamically patched (enable:%d)\n", patched_enable);
 	}
 	else if (strcmp(mod->name, "mca_strategy_fg_comp") == 0) {
 		bool patched_low = false, patched_high = false;
