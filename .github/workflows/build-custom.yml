@@ -172,8 +172,20 @@ jobs:
 
       - name: Download Clang Toolchain
         run: |
-          mkdir -p toolchains
-          git clone --depth=1 https://github.com/ZyCromerZ/Clang.git -b main toolchains/clang
+          mkdir -p toolchains/clang
+          URL=$(curl -s https://api.github.com/repos/ZyCromerZ/Clang/releases | python3 -c "
+          import sys, json
+          for r in json.load(sys.stdin):
+              if '23.0' in r['tag_name']:
+                  for a in r['assets']:
+                      if a['name'].endswith('.tar.gz'):
+                          print(a['browser_download_url'])
+                          exit()
+          ")
+          curl -L "$URL" -o toolchains/clang.tar.gz
+          tar -xzf toolchains/clang.tar.gz -C toolchains/clang --strip-components=1
+          rm toolchains/clang.tar.gz
+          toolchains/clang/bin/clang --version
 
       - name: Setup AnyKernel3
         run: |
