@@ -2,6 +2,16 @@
 set -e
 
 # ==========================================
+# Cleanup Trap
+# ==========================================
+cleanup() {
+    # Revert dynamic Baseband-guard modifications to keep git tree clean
+    git checkout security/Kconfig security/Makefile security/selinux/ 2>/dev/null || true
+    rm -f security/baseband-guard
+}
+trap cleanup EXIT
+
+# ==========================================
 # Konoha Kernel Build Script
 # Usage: ./build.sh [key=value ...]
 #   hz=100|250|1000       Timer frequency (default: 250)
@@ -94,13 +104,14 @@ if [ "$VARIANT" != "stock" ] && [ -z "$ROOT" ]; then
     echo "         Select Root Solution             "
     echo "=========================================="
     echo " 1) KernelSU-Next (default)"
-    echo " 2) Sukisu"
-    echo " 3) ReSukiSU"
-    echo " 4) MamboSU"
-    echo " 5) APatch (KernelPatch)"
-    echo " 6) FolkPatch (KernelPatch)"
-    read -p "Enter choice [1-6] (default 1): " _c
-    case "${_c:-1}" in 2) ROOT="sukisu" ;; 3) ROOT="resukisu" ;; 4) ROOT="mambosu" ;; 5) ROOT="apatch" ;; 6) ROOT="folkpatch" ;; *) ROOT="ksu-next" ;; esac
+    echo " 2) KernelSU (Official)"
+    echo " 3) Sukisu"
+    echo " 4) ReSukiSU"
+    echo " 5) MamboSU"
+    echo " 6) APatch (KernelPatch)"
+    echo " 7) FolkPatch (KernelPatch)"
+    read -p "Enter choice [1-7] (default 1): " _c
+    case "${_c:-1}" in 2) ROOT="ksu" ;; 3) ROOT="sukisu" ;; 4) ROOT="resukisu" ;; 5) ROOT="mambosu" ;; 6) ROOT="apatch" ;; 7) ROOT="folkpatch" ;; *) ROOT="ksu-next" ;; esac
 fi
 
 # 5. KPM (only for sukisu/resukisu/apatch/folkpatch)
@@ -176,6 +187,7 @@ fi
 # Resolve Root Solution
 # ==========================================
 case "$ROOT" in
+    ksu)      ROOT_REPO="https://github.com/tiann/KernelSU.git"; REPO_NAME="KernelSU"; BRANCH="main" ;;
     sukisu)   ROOT_REPO="https://github.com/sukisu-ultra/sukisu-ultra.git"; REPO_NAME="sukisu-ultra"; BRANCH="main" ;;
     resukisu) ROOT_REPO="https://github.com/ReSukiSU/ReSukiSU.git"; REPO_NAME="ReSukiSU"; BRANCH="main" ;;
     mambosu)  ROOT_REPO="https://github.com/RapliVx/KernelSU.git"; REPO_NAME="MamboSU"; BRANCH="master" ;;
@@ -382,6 +394,17 @@ if [ "$KPM" == "on" ]; then
     chmod +x "$KPTOOLS_BIN"
     echo "[+] KPM tools ready: $(file -b "$KPTOOLS_BIN" | cut -d, -f1-2)"
 fi
+
+# ==========================================
+# Baseband-guard Setup
+# ==========================================
+BBG_DIR="$KERNEL_DIR/Baseband-guard"
+if [ ! -d "$BBG_DIR" ]; then
+    echo "[+] Cloning Baseband-guard..."
+    git clone https://github.com/vc-teahouse/Baseband-guard.git "$BBG_DIR"
+fi
+echo "[+] Running Baseband-guard setup..."
+(cd "$KERNEL_DIR" && sh "$BBG_DIR/setup.sh")
 
 # ==========================================
 # Toolchain Setup

@@ -23,11 +23,13 @@ jobs:
           - { id: 500, name: performance }
           - { id: 1000, name: ultra-performance }
         variant: [stock, root, susfs]
-        root: [none, ksu-next, sukisu, resukisu, mambosu]
+        root: [none, ksu, ksu-next, sukisu, resukisu, mambosu]
         kpm: [off, on]
         hardened: [off, on]
         bypasscharging: [off, on]
         exclude:
+          - variant: stock
+            root: ksu
           - variant: stock
             root: ksu-next
           - variant: stock
@@ -43,10 +45,16 @@ jobs:
           - variant: stock
             kpm: on
           - variant: root
+            root: ksu
+            kpm: on
+          - variant: root
             root: ksu-next
             kpm: on
           - variant: root
             root: mambosu
+            kpm: on
+          - variant: susfs
+            root: ksu
             kpm: on
           - variant: susfs
             root: ksu-next
@@ -218,18 +226,19 @@ jobs:
                   fl = f.lower()
                   if variant not in fl: continue
                   
+                  if root == 'ksu' and ('kernelsu' not in fl or 'next' in fl): continue
                   if root == 'ksu-next' and 'next' not in fl: continue
                   if root == 'sukisu' and ('sukisu' not in fl or 'resukisu' in fl): continue
                   if root == 'resukisu' and 'resukisu' not in fl: continue
                   if root == 'mambosu' and 'mambosu' not in fl: continue
                   if root == 'apatch' and 'apatch' not in fl: continue
                   if root == 'folkpatch' and 'folkpatch' not in fl: continue
-                  if root == 'none' and any(x in fl for x in ['next', 'sukisu', 'resukisu', 'mambosu', 'apatch', 'folkpatch']): continue
+                  if root == 'none' and any(x in fl for x in ['kernelsu', 'sukisu', 'resukisu', 'mambosu', 'apatch', 'folkpatch']): continue
                   
-                  if hz == 'ultra-performance' and 'ultra' not in fl: continue
-                  if hz == 'performance' and ('performance' not in fl or 'ultra' in fl): continue
-                  if hz == 'powersave' and 'powersave' not in fl: continue
-                  if hz == 'balance' and 'balance' not in fl: continue
+                  if hz == 'ultra-performance' and '-ultra-performance-' not in fl: continue
+                  if hz == 'performance' and ('-performance-' not in fl or '-ultra-performance-' in fl): continue
+                  if hz == 'powersave' and '-powersave-' not in fl: continue
+                  if hz == 'balance' and '-balance-' not in fl: continue
                   
                   if kpm and '-kpm' not in fl: continue
                   if not kpm and '-kpm' in fl: continue
@@ -253,6 +262,7 @@ jobs:
               
           std = [
               ('Stock', 'stock', 'none', False, False),
+              ('KernelSU', 'root', 'ksu', False, False),
               ('KernelSU Next', 'root', 'ksu-next', False, False),
               ('Sukisu', 'root', 'sukisu', False, False),
               ('Sukisu + KPM', 'root', 'sukisu', True, False),
@@ -263,6 +273,7 @@ jobs:
               ('FolkPatch', 'root', 'folkpatch', True, False),
           ]
           susfs = [
+              ('KernelSU', 'susfs', 'ksu', False, False),
               ('KernelSU Next', 'susfs', 'ksu-next', False, False),
               ('Sukisu', 'susfs', 'sukisu', False, False),
               ('Sukisu + KPM', 'susfs', 'sukisu', True, False),
@@ -274,6 +285,7 @@ jobs:
           ]
           hard = [
               ('Stock', 'stock', 'none', False, True),
+              ('KernelSU', 'root', 'ksu', False, True),
               ('KernelSU Next', 'root', 'ksu-next', False, True),
               ('Sukisu', 'root', 'sukisu', False, True),
               ('Sukisu + KPM', 'root', 'sukisu', True, True),
@@ -284,6 +296,7 @@ jobs:
               ('FolkPatch', 'root', 'folkpatch', True, True),
           ]
           susfs_hard = [
+              ('KernelSU', 'susfs', 'ksu', False, True),
               ('KernelSU Next', 'susfs', 'ksu-next', False, True),
               ('Sukisu', 'susfs', 'sukisu', False, True),
               ('Sukisu + KPM', 'susfs', 'sukisu', True, True),
