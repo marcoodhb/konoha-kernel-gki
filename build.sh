@@ -6,7 +6,7 @@ set -e
 # ==========================================
 cleanup() {
     # Revert dynamic Baseband-guard modifications to keep git tree clean
-    git checkout security/Kconfig security/Makefile security/selinux/ 2>/dev/null || true
+    git checkout security/Kconfig security/Makefile security/selinux/ include/linux/sched.h 2>/dev/null || true
     rm -f security/baseband-guard
 }
 trap cleanup EXIT
@@ -23,6 +23,7 @@ trap cleanup EXIT
 #   kpm_patch=on|off      Inject kpimg with kptools (default: on; resukisu defaults off)
 #   lto=thin|full|none    LTO type (default: thin)
 #   autofdo=on|off        AutoFDO (default: on)
+#   droidspaces=on|off    Droidspaces support (default: off)
 # ==========================================
 
 VERSION="1.1"
@@ -44,9 +45,28 @@ for arg in "$@"; do
         wifi_exploit=*) WIFI_EXPLOIT="${arg#*=}" ;;
         kgsl_exploit=*) KGSL_EXPLOIT="${arg#*=}" ;;
         data_exploit=*) DATA_EXPLOIT="${arg#*=}" ;;
+        droidspaces=*) DROIDSPACES="${arg#*=}" ;;
+        debug=*) DEBUG_MODE="${arg#*=}" ;;
     esac
 done
 
+# ==========================================
+# Non-Interactive Mode (Defaults)
+# ==========================================
+if [ "$#" -gt 0 ]; then
+    NON_INTERACTIVE=1
+    [ -z "$HZ" ] && HZ=250
+    [ -z "$HARDENED" ] && HARDENED="off"
+    [ -z "$VARIANT" ] && VARIANT="stock"
+    [ -z "$ROOT" ] && [ "$VARIANT" != "stock" ] && ROOT="ksu-next"
+    [ -z "$KPM" ] && KPM="off"
+    [ -z "$LTO_TYPE" ] && LTO_TYPE="thin"
+    [ -z "$BYPASSCHARGING" ] && BYPASSCHARGING="off"
+    [ -z "$DROIDSPACES" ] && DROIDSPACES="off"
+    [ -z "$DEBUG_MODE" ] && DEBUG_MODE="off"
+else
+    NON_INTERACTIVE=0
+fi
 # ==========================================
 # Paths
 # ==========================================
@@ -106,16 +126,17 @@ if [ "$VARIANT" != "stock" ] && [ -z "$ROOT" ]; then
     echo " 1) KernelSU-Next (default)"
     echo " 2) KernelSU (Official)"
     echo " 3) Sukisu"
-    echo " 4) ReSukiSU"
-    echo " 5) MamboSU"
-    echo " 6) APatch (KernelPatch)"
-    echo " 7) FolkPatch (KernelPatch)"
-    read -p "Enter choice [1-7] (default 1): " _c
-    case "${_c:-1}" in 2) ROOT="ksu" ;; 3) ROOT="sukisu" ;; 4) ROOT="resukisu" ;; 5) ROOT="mambosu" ;; 6) ROOT="apatch" ;; 7) ROOT="folkpatch" ;; *) ROOT="ksu-next" ;; esac
+    echo " 4) YukiSU"
+    echo " 5) ReSukiSU"
+    echo " 6) MamboSU"
+    echo " 7) APatch (KernelPatch)"
+    echo " 8) FolkPatch (KernelPatch)"
+    read -p "Enter choice [1-8] (default 1): " _c
+    case "${_c:-1}" in 2) ROOT="ksu" ;; 3) ROOT="sukisu" ;; 4) ROOT="yukisu" ;; 5) ROOT="resukisu" ;; 6) ROOT="mambosu" ;; 7) ROOT="apatch" ;; 8) ROOT="folkpatch" ;; *) ROOT="ksu-next" ;; esac
 fi
 
-# 5. KPM (only for sukisu/resukisu/apatch/folkpatch)
-KPM_SUPPORTED_ROOTS="sukisu resukisu apatch folkpatch"
+# 5. KPM (only for sukisu/yukisu/resukisu/apatch/folkpatch)
+KPM_SUPPORTED_ROOTS="sukisu yukisu resukisu apatch folkpatch"
 if [ "$VARIANT" != "stock" ] && echo "$KPM_SUPPORTED_ROOTS" | grep -qw "$ROOT"; then
     if [ -z "$KPM" ]; then
         echo "=========================================="
@@ -127,7 +148,7 @@ if [ "$VARIANT" != "stock" ] && echo "$KPM_SUPPORTED_ROOTS" | grep -qw "$ROOT"; 
         [ "${_c:-1}" == "2" ] && KPM="on" || KPM="off"
     fi
     if [ "$KPM" == "on" ] && [ -z "$KPM_SUPERKEY" ]; then
-        if [ -t 0 ]; then
+        if [ -t 0 ] && [ "$NON_INTERACTIVE" != "1" ]; then
             read -p "Enter KPM SuperKey (or leave empty to auto-generate): " KPM_SUPERKEY
         fi
         if [ -z "$KPM_SUPERKEY" ]; then
@@ -175,6 +196,28 @@ if [ -z "$BYPASSCHARGING" ]; then
     [ "${_c:-1}" == "2" ] && BYPASSCHARGING="on" || BYPASSCHARGING="off"
 fi
 
+# 8. Droidspaces
+if [ -z "$DROIDSPACES" ]; then
+    echo "=========================================="
+    echo "            Droidspaces Support           "
+    echo "=========================================="
+    echo " 1) OFF (default)"
+    echo " 2) ON  (Add configs and kABI patches)"
+    read -p "Enter choice [1-2] (default 1): " _c
+    [ "${_c:-1}" == "2" ] && DROIDSPACES="on" || DROIDSPACES="off"
+fi
+
+# 9. Debug Mode
+if [ -z "$DEBUG_MODE" ]; then
+    echo "=========================================="
+    echo "               Debug Mode                 "
+    echo "=========================================="
+    echo " 1) OFF (default - full optimizations)"
+    echo " 2) ON  (nokaslr, no icf/merge-constants)"
+    read -p "Enter choice [1-2] (default 1): " _c
+    [ "${_c:-1}" == "2" ] && DEBUG_MODE="on" || DEBUG_MODE="off"
+fi
+
 # Set defaults for performance mods (all ON by default)
 [ -z "$HTSR" ] && HTSR="on"
 [ -z "$WIFI_EXPLOIT" ] && WIFI_EXPLOIT="on"
@@ -189,6 +232,7 @@ fi
 case "$ROOT" in
     ksu)      ROOT_REPO="https://github.com/tiann/KernelSU.git"; REPO_NAME="KernelSU"; BRANCH="main" ;;
     sukisu)   ROOT_REPO="https://github.com/sukisu-ultra/sukisu-ultra.git"; REPO_NAME="sukisu-ultra"; BRANCH="main" ;;
+    yukisu)   ROOT_REPO="https://github.com/Anatdx/YukiSU.git"; REPO_NAME="YukiSU"; BRANCH="main" ;;
     resukisu) ROOT_REPO="https://github.com/ReSukiSU/ReSukiSU.git"; REPO_NAME="ReSukiSU"; BRANCH="main" ;;
     mambosu)  ROOT_REPO="https://github.com/RapliVx/KernelSU.git"; REPO_NAME="MamboSU"; BRANCH="master" ;;
     apatch)   REPO_NAME="APatch" ;;
@@ -270,8 +314,8 @@ else
         ln -sfn ../uapi "$MODULES_DIR/$REPO_NAME/kernel/uapi"
     fi
 
-    # SukiSU KPM header compatibility fixes
-    if [ "$ROOT" == "sukisu" ] && [ "$KPM" == "on" ]; then
+    # SukiSU / YukiSU KPM header compatibility fixes
+    if { [ "$ROOT" == "sukisu" ] || [ "$ROOT" == "yukisu" ]; } && [ "$KPM" == "on" ]; then
         KPM_HEADER="$MODULES_DIR/$REPO_NAME/kernel/kpm/kpm.h"
         KPM_COMPACT="$MODULES_DIR/$REPO_NAME/kernel/kpm/compact.c"
         SUPERCALL_UAPI="$MODULES_DIR/$REPO_NAME/uapi/supercall.h"
@@ -325,6 +369,7 @@ echo " HTSR 240Hz: ${HTSR^^}"
 echo " WiFi Exploit: ${WIFI_EXPLOIT^^}"
 echo " KGSL Exploit: ${KGSL_EXPLOIT^^}"
 echo " Data Exploit: ${DATA_EXPLOIT^^}"
+echo " Debug Mode:   ${DEBUG_MODE^^}"
 [ "$VARIANT" != "stock" ] && echo " Variant:   ${VARIANT} ($REPO_NAME)" || echo " Variant:   stock"
 echo " LTO:       ${LTO_TYPE^^}"
 if [ "$VARIANT" != "stock" ]; then
@@ -449,8 +494,6 @@ EXTREME_CLANG_FLAGS=(
     # functions & vectors
     # -ffunction-sections (causes ld.lld orphaned section errors in vmlinux)
     -fslp-vectorize
-    # -fdata-sections // error is being placed in '.init.bss.cmdline.o' section, which is not supported by the current linker script
-    -fmerge-all-constants
     -fdelete-null-pointer-checks
     -moutline 
     # No safeties (Raw Performance)
@@ -500,7 +543,12 @@ if [ "$DATA_EXPLOIT" == "on" ]; then
     KERNEL_KCFLAGS="$KERNEL_KCFLAGS -DCONFIG_DATA_EXPLOIT=1"
 fi
 
-KERNEL_LDFLAGS="-O2 --icf=all -mllvm -enable-new-pm=1"
+if [ "$DEBUG_MODE" == "off" ]; then
+    KERNEL_KCFLAGS="$KERNEL_KCFLAGS -fmerge-all-constants"
+    KERNEL_LDFLAGS="--icf=all"
+else
+    KERNEL_LDFLAGS=""
+fi
 
 if ! check_clang; then
     echo "[-] No Clang toolchain found!"
@@ -519,7 +567,7 @@ case "$VARIANT" in
     root)  scripts/config --file "$OUT_DIR/.config" -e CONFIG_KSU -d CONFIG_KSU_SUSFS ;;
     susfs) 
         scripts/config --file "$OUT_DIR/.config" -e CONFIG_KSU_SUSFS -e CONFIG_KSU_SUSFS_SUS_MAP
-        if [[ "$ROOT" == *"ksu"* ]] || [[ "$ROOT" == *"sukisu"* ]] || [[ "$ROOT" == "mambosu" ]]; then
+        if [ "$VARIANT" != "stock" ]; then
             scripts/config --file "$OUT_DIR/.config" -e CONFIG_KSU
         else
             scripts/config --file "$OUT_DIR/.config" -d CONFIG_KSU
@@ -597,8 +645,16 @@ CURRENT_CMDLINE=$(grep '^CONFIG_CMDLINE=' "$OUT_DIR/.config" | sed 's/^CONFIG_CM
 CMDLINE_APPEND=""
 echo "$CURRENT_CMDLINE" | grep -q "kasan=off" || CMDLINE_APPEND="$CMDLINE_APPEND kasan=off"
 echo "$CURRENT_CMDLINE" | grep -q "panic_on_rcu_stall" || CMDLINE_APPEND="$CMDLINE_APPEND kernel.panic_on_rcu_stall=0"
+if [ "$DEBUG_MODE" == "on" ]; then
+    echo "$CURRENT_CMDLINE" | grep -q "nokaslr" || CMDLINE_APPEND="$CMDLINE_APPEND nokaslr"
+fi
 [ -n "$CMDLINE_APPEND" ] && \
     scripts/config --file "$OUT_DIR/.config" --set-str CONFIG_CMDLINE "$CURRENT_CMDLINE$CMDLINE_APPEND"
+
+# Setup Droidspaces Support
+if [ "$DROIDSPACES" == "on" ]; then
+    ./setup_droidspaces.sh "$OUT_DIR"
+fi
 
 # Single olddefconfig to finalize all changes
 make O="$OUT_DIR" CC=clang LLVM=1 LLVM_IAS=1 olddefconfig || exit 1
@@ -689,6 +745,7 @@ fi
 [ "$KPM" == "on" ] && ZIP_SUFFIX="${ZIP_SUFFIX}-kpm"
 [ "$HARDENED" == "on" ] && ZIP_SUFFIX="${ZIP_SUFFIX}-hardened"
 [ "$BYPASSCHARGING" == "on" ] && ZIP_SUFFIX="${ZIP_SUFFIX}-bypasscharging"
+[ "$DROIDSPACES" == "on" ] && ZIP_SUFFIX="${ZIP_SUFFIX}-droidspaces"
 [ "$HTSR" == "off" ] && ZIP_SUFFIX="${ZIP_SUFFIX}-nohtsr"
 [ "$WIFI_EXPLOIT" == "off" ] && ZIP_SUFFIX="${ZIP_SUFFIX}-nowifi"
 [ "$KGSL_EXPLOIT" == "off" ] && ZIP_SUFFIX="${ZIP_SUFFIX}-nokgsl"

@@ -8,6 +8,8 @@
 #define pr_fmt(fmt)	"reboot: " fmt
 
 #include <linux/atomic.h>
+#include <linux/cpuidle.h>
+#include <linux/smp.h>
 #include <linux/ctype.h>
 #include <linux/export.h>
 #include <linux/kexec.h>
@@ -271,6 +273,15 @@ void kernel_restart(char *cmd)
 	kernel_restart_prepare(cmd);
 	do_kernel_restart_prepare();
 	migrate_to_reboot_cpu();
+	/*
+	 * Stop all secondary CPUs before syscore_shutdown(). On Qualcomm
+	 * SM8735, the vendor minidump module crashes (NULL deref at 0x9)
+	 * when processing trace_android_vh_ipi_stop() on idle CPUs.
+	 * By stopping CPUs here, the IPI stop is delivered while CPUs
+	 * are in a clean parked state, and timer hardware is still active.
+	 */
+
+	smp_send_stop();
 	syscore_shutdown();
 	if (!cmd)
 		pr_emerg("Restarting system\n");
@@ -298,6 +309,15 @@ void kernel_halt(void)
 {
 	kernel_shutdown_prepare(SYSTEM_HALT);
 	migrate_to_reboot_cpu();
+	/*
+	 * Stop all secondary CPUs before syscore_shutdown(). On Qualcomm
+	 * SM8735, the vendor minidump module crashes (NULL deref at 0x9)
+	 * when processing trace_android_vh_ipi_stop() on idle CPUs.
+	 * By stopping CPUs here, the IPI stop is delivered while CPUs
+	 * are in a clean parked state, and timer hardware is still active.
+	 */
+
+	smp_send_stop();
 	syscore_shutdown();
 	pr_emerg("System halted\n");
 	kmsg_dump(KMSG_DUMP_SHUTDOWN);
@@ -684,6 +704,15 @@ void kernel_power_off(void)
 	kernel_shutdown_prepare(SYSTEM_POWER_OFF);
 	do_kernel_power_off_prepare();
 	migrate_to_reboot_cpu();
+	/*
+	 * Stop all secondary CPUs before syscore_shutdown(). On Qualcomm
+	 * SM8735, the vendor minidump module crashes (NULL deref at 0x9)
+	 * when processing trace_android_vh_ipi_stop() on idle CPUs.
+	 * By stopping CPUs here, the IPI stop is delivered while CPUs
+	 * are in a clean parked state, and timer hardware is still active.
+	 */
+
+	smp_send_stop();
 	syscore_shutdown();
 	pr_emerg("Power down\n");
 	kmsg_dump(KMSG_DUMP_SHUTDOWN);

@@ -32,8 +32,10 @@ detect_manager() {
 
     if [ -n "$hint" ]; then
         case "$hint" in
+            ksu)       echo "ksu" ;;
             ksu-next)  echo "ksu-next" ;;
             sukisu)    echo "sukisu" ;;
+            yukisu)    echo "yukisu" ;;
             resukisu)  echo "resukisu" ;;
             mambosu)   echo "mambosu" ;;
             apatch)    echo "apatch" ;;
@@ -49,6 +51,7 @@ detect_manager() {
         case "$url" in
             *KernelSU-Next*|*kernelsu-next*) echo "ksu-next"; return ;;
             *sukisu*|*SukiSU*|*Sukisu*)      echo "sukisu"; return ;;
+            *YukiSU*|*yukisu*)               echo "yukisu"; return ;;
             *ReSukiSU*|*resukisu*)           echo "resukisu"; return ;;
             *RapliVx*|*MamboSU*|*mambosu*)   echo "mambosu"; return ;;
         esac
@@ -97,7 +100,6 @@ if [ "$MANAGER" = "resukisu" ]; then
         }' "$SELINUX_HIDE_C"
         echo "[SUSFS-Fixup] selinux_hide.c: Removed undefined context_struct_compute_av_fn"
     fi
-    exit 0
 fi
 
 # ==========================================================================
@@ -181,18 +183,16 @@ fi
 # ==========================================================================
 # [SHARED] selinux/rules.c — susfs SID init calls
 # ==========================================================================
-if [ -f "$RULES_C" ] && ! grep -q "susfs_set_zygote_sid" "$RULES_C" 2>/dev/null; then
+if [ "$MANAGER" != "resukisu" ] && [ -f "$RULES_C" ] && ! grep -q "susfs_set_zygote_sid" "$RULES_C" 2>/dev/null; then
     if grep -q "susfs_set_batch_sid" "$RULES_C" 2>/dev/null; then
         echo "[SUSFS-Fixup] selinux/rules.c: Using modern susfs_set_batch_sid"
     else
         if [ -f "$SELINUX_H" ]; then
-            for fn in susfs_set_init_sid susfs_set_ksu_sid susfs_set_zygote_sid; do
-                grep -q "$fn" "$SELINUX_H" 2>/dev/null || \
-                    sed -i "/^#endif/i void ${fn}(void);" "$SELINUX_H"
-            done
+            grep -q "susfs_set_batch_sid" "$SELINUX_H" 2>/dev/null || \
+                sed -i "/^#endif/i void susfs_set_batch_sid(void);" "$SELINUX_H"
         fi
         if grep -q "reset_avc_cache();" "$RULES_C" 2>/dev/null; then
-            sed -i 's/^[ \t]*reset_avc_cache();/\tsusfs_set_init_sid();\n\tsusfs_set_ksu_sid();\n\tsusfs_set_zygote_sid();\n\treset_avc_cache();/' "$RULES_C"
+            sed -i 's/^[ \t]*reset_avc_cache();/\tsusfs_set_batch_sid();\n\treset_avc_cache();/' "$RULES_C"
         fi
         echo "[SUSFS-Fixup] selinux/rules.c: OK"
     fi
@@ -306,8 +306,16 @@ EOF
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/fs.h>
 struct user_arg_ptr;
+EOF
+
+    if ! grep -q "ksu_handle_execveat_init" "$SUCOMPAT_C" 2>/dev/null; then
+        cat >> "$SUCOMPAT_H" << 'EOF'
 int ksu_handle_execveat_init(struct filename *filename,
     struct user_arg_ptr *argv_user, struct user_arg_ptr *envp_user);
+EOF
+    fi
+
+    cat >> "$SUCOMPAT_H" << 'EOF'
 int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
     void *argv_user, void *envp_user, int *__never_use_flags);
 int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
@@ -389,6 +397,62 @@ fi
 # ==========================================================================
 # [MANAGER-SPECIFIC] Fixes per kernel manager
 # ==========================================================================
+
+# --------------------------------------------------------------------------
+# YukiSU: Fix adb_root and syscall_hook_manager signatures
+# --------------------------------------------------------------------------
+fix_yukisu_adb_root() {
+    local adb_root_c="$KSU_KERNEL/feature/adb_root.c"
+    local hook_mgr="$KSU_KERNEL/syscall_hook_manager.c"
+    
+    if [ -f "$adb_root_c" ]; then
+        if grep -q "static long do_ksu_adb_root_handle_execve(struct pt_regs \*regs)" "$adb_root_c" 2>/dev/null; then
+            sed -i 's|static long is_exec_adbd(struct pt_regs \*regs)|static long is_exec_adbd(const char \*filename)|' "$adb_root_c"
+            sed -i 's|if (likely(is_exec_adbd(regs) != 1)) {|if (likely(is_exec_adbd(filename) != 1)) {|' "$adb_root_c"
+            sed -i '1s/^/#include <linux\/susfs.h>\n/' "$adb_root_c"
+            sed -i '/static long is_exec_adbd(const char \*filename)/,/^}/c\
+static long is_exec_adbd(const char *filename)\
+{\
+    if (strstr(filename, "adbd"))\
+        pr_info("is_exec_adbd() => filename: %s\\n", filename);\
+    return (susfs_starts_with(filename, "/apex/") &&\
+                susfs_ends_with(filename, "/adbd"));\
+}' "$adb_root_c"
+            
+            sed -i 's|unsigned long stackp = user_stack_pointer(regs);|unsigned long stackp = current_user_stack_pointer();|' "$adb_root_c"
+            sed -i 's|unsigned long \*envp_p = (unsigned long \*)&PT_REGS_PARM3(regs);|unsigned long \*envp_p = (unsigned long \*)envp_user_ptr;|' "$adb_root_c"
+            sed -i 's|static long setup_ld_preload(struct pt_regs \*regs)|static long setup_ld_preload(void \*\*\*envp_user_ptr)|' "$adb_root_c"
+            sed -i 's|long ret = setup_ld_preload(regs);|long ret = setup_ld_preload(envp_user_ptr);|' "$adb_root_c"
+            sed -i 's|ret = setup_ld_preload(regs);|ret = setup_ld_preload(envp_user_ptr);|' "$adb_root_c"
+            
+            sed -i 's|static long do_ksu_adb_root_handle_execve(struct pt_regs \*regs)|static long do_ksu_adb_root_handle_execve(const char \*filename, void \*\*\*envp_user_ptr)|' "$adb_root_c"
+            sed -i 's|long ksu_adb_root_handle_execve(struct pt_regs \*regs)|long ksu_adb_root_handle_execve(const char \*filename, void \*\*\*envp_user_ptr)|' "$adb_root_c"
+            sed -i 's|return do_ksu_adb_root_handle_execve(regs);|return do_ksu_adb_root_handle_execve(filename, envp_user_ptr);|' "$adb_root_c"
+            echo "[SUSFS-Fixup] adb_root.c: Fixed adb_root call signatures for YukiSU"
+        fi
+    fi
+    
+    if [ -f "$hook_mgr" ]; then
+        if grep -q 'ksu_adb_root_handle_execve((struct pt_regs \*)regs)' "$hook_mgr" 2>/dev/null; then
+            sed -i 's|ksu_adb_root_handle_execve((struct pt_regs \*)regs)|ksu_adb_root_handle_execve((const char \*)PT_REGS_PARM1(regs), (void \*\*\*)\&PT_REGS_PARM3(regs))|' "$hook_mgr"
+            echo "[SUSFS-Fixup] syscall_hook_manager.c: Fixed adb_root call signature for YukiSU"
+        fi
+    fi
+
+    # Inject missing static keys required by susfs patches if not present
+    local ksu_c="$KSU_KERNEL/ksu.c"
+    if [ -f "$ksu_c" ]; then
+        if ! grep -q "ksu_is_init_rc_hook_enabled" "$ksu_c" 2>/dev/null; then
+            sed -i '/#include <linux\/module.h>/a \
+DEFINE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);\
+EXPORT_SYMBOL_GPL(ksu_is_init_rc_hook_enabled);\
+DEFINE_STATIC_KEY_TRUE(ksu_is_input_hook_enabled);\
+EXPORT_SYMBOL_GPL(ksu_is_input_hook_enabled);' "$ksu_c"
+            echo "[SUSFS-Fixup] ksu.c: Injected missing static keys for YukiSU"
+        fi
+    fi
+}
+
 
 # --------------------------------------------------------------------------
 # MamboSU / Sukisu-Ultra: kprobe-based reboot interception needs SUSFS forwarding
@@ -588,8 +652,7 @@ STAT_USER_EOF
 
 long ksu_handle_execve_sucompat(const char __user **filename_user, int orig_nr, const struct pt_regs *regs)
 {
-    long (*sys_func)(const struct pt_regs *) = ksu_syscall_table[orig_nr];
-    return sys_func(regs);
+    return 0;
 }
 SUCOMPAT_EOF
         echo "[SUSFS-Fixup] sucompat.c: Injected ksu_handle_execve_sucompat stub"
@@ -730,12 +793,92 @@ SUPERCALL_NEXT_EOF
 fix_ksu_next_ksud() {
     if [ ! -f "$KSUD_INT_C" ]; then return; fi
 
+    # Fix compilation errors in upstream ksud_integration.c
+    if ! grep -q "static void stop_init_rc_hook(void);" "$KSUD_INT_C" 2>/dev/null; then
+        sed -i '/DEFINE_STATIC_KEY_TRUE(ksu_is_input_hook_enabled);/a \
+\
+static void stop_init_rc_hook(void);\
+static struct work_struct stop_input_hook_work;' "$KSUD_INT_C"
+        echo "[SUSFS-Fixup] ksud_integration.c: Added missing declarations"
+    fi
+
+    if grep -q "ksu_handle_execveat_ksud(path, &argv);" "$KSUD_INT_C" 2>/dev/null; then
+        sed -i 's/char path\[32\];/char path\[256\];\n    struct filename dummy_filename;\n    struct filename \*dummy_filename_ptr = \&dummy_filename;\n    int fd = AT_FDCWD;\n    int flags = 0;/' "$KSUD_INT_C"
+        sed -i 's/strncpy_from_user(path, fn, 32);/strncpy_from_user(path, fn, sizeof(path));/' "$KSUD_INT_C"
+        sed -i 's/ksu_handle_execveat_ksud(path, &argv);/dummy_filename.name = path;\n    ksu_handle_execveat_ksud(\&fd, \&dummy_filename_ptr, \&argv, NULL, \&flags);/' "$KSUD_INT_C"
+        echo "[SUSFS-Fixup] ksud_integration.c: Fixed ksu_handle_execveat_ksud argument mismatch"
+    fi
+
     # Fix extern → include for ksu_handle_execveat_init
     if grep -q "extern int ksu_handle_execveat_init" "$KSUD_INT_C" 2>/dev/null; then
         if ! grep -q "feature/sucompat.h" "$KSUD_INT_C" 2>/dev/null; then
             sed -i '/#include "selinux\/selinux.h"/a #include "feature/sucompat.h"' "$KSUD_INT_C"
         fi
         sed -i '/^extern int ksu_handle_execveat_init/d' "$KSUD_INT_C"
+    fi
+
+    # Fix broken ksu_handle_vfs_fstat / ksu_sys_fstat / ksu_sys_read / kprobes
+    if grep -q "void ksu_handle_vfs_fstat(int fd, loff_t \*kstat_size_ptr)" "$KSUD_INT_C" 2>/dev/null; then
+        sed -i '/void ksu_handle_vfs_fstat(int fd, loff_t \*kstat_size_ptr)/,/^}/c\
+static long (*orig_sys_fstat)(const struct pt_regs *regs);\
+static long ksu_sys_fstat(const struct pt_regs *regs)\
+{\
+    unsigned int fd = PT_REGS_PARM1(regs);\
+    void __user *statbuf = (void __user *)PT_REGS_PARM2(regs);\
+    bool is_rc = false;\
+    long ret;\
+\
+    struct file *file = fget(fd);\
+    if (file) {\
+        if (is_init_rc(file)) {\
+            pr_info("stat init.rc\\n");\
+            is_rc = true;\
+        }\
+        fput(file);\
+    }\
+\
+    ret = orig_sys_fstat(regs);\
+\
+    if (is_rc) {\
+        void __user *st_size_ptr = statbuf + offsetof(struct stat, st_size);\
+        long size, new_size;\
+        if (!copy_from_user_nofault(&size, st_size_ptr, sizeof(long))) {\
+            new_size = size + ksu_rc_len;\
+            pr_info("adding ksu_rc_len: %ld -> %ld", size, new_size);\
+            if (!copy_to_user_nofault(st_size_ptr, &new_size, sizeof(long))) {\
+                pr_info("added ksu_rc_len");\
+            } else {\
+                pr_err("add ksu_rc_len failed: statbuf 0x%lx", (unsigned long)st_size_ptr);\
+            }\
+        } else {\
+            pr_err("read statbuf 0x%lx failed", (unsigned long)st_size_ptr);\
+        }\
+    }\
+\
+    return ret;\
+}' "$KSUD_INT_C"
+        echo "[SUSFS-Fixup] ksud_integration.c: Restored ksu_sys_fstat"
+    fi
+
+    if ! grep -q "ksu_sys_read(const struct pt_regs" "$KSUD_INT_C" 2>/dev/null; then
+        sed -i '/^static unsigned int volumedown_pressed_count/i\
+static long (*orig_sys_read)(const struct pt_regs *regs);\
+static long ksu_sys_read(const struct pt_regs *regs)\
+{\
+    unsigned int fd = PT_REGS_PARM1(regs);\
+    char __user **buf_ptr = (char __user **)&PT_REGS_PARM2(regs);\
+    size_t *count_ptr = (size_t *)&PT_REGS_PARM3(regs);\
+\
+    ksu_handle_sys_read(fd, buf_ptr, count_ptr);\
+    return orig_sys_read(regs);\
+}\
+' "$KSUD_INT_C"
+        echo "[SUSFS-Fixup] ksud_integration.c: Restored ksu_sys_read"
+    fi
+
+    if ! grep -q "linux/kprobes.h" "$KSUD_INT_C" 2>/dev/null; then
+        sed -i '1s/^/#include <linux\/kprobes.h>\n/' "$KSUD_INT_C"
+        echo "[SUSFS-Fixup] ksud_integration.c: Restored linux/kprobes.h"
     fi
 
     # ksu_execve_hook_ksud wrapper (needed by syscall_event_bridge.c)
@@ -807,14 +950,6 @@ void ksu_execve_hook_ksud(const struct pt_regs *regs)
     }
 #endif
 }
-
-void ksu_stop_input_hook_runtime(void)
-{
-    extern struct static_key_true ksu_is_input_hook_enabled;
-    if (static_key_enabled(&ksu_is_input_hook_enabled))
-        static_branch_disable(&ksu_is_input_hook_enabled);
-    pr_info("ksu_is_input_hook_enabled disabled\n");
-}
 KSUD_COMPAT_EOF
         echo "[SUSFS-Fixup] ksud_integration.c: Added compat wrappers"
     fi
@@ -866,7 +1001,7 @@ fix_ksu_next_susfs_umount() {
             # Delete the old-style loop call block completely
             sed -i '/#ifdef CONFIG_KSU_SUSFS_SUS_PATH/,/#endif/d' "$SETUID_HOOK_C"
             # Inject new deferred workqueue block before susfs_set_current_proc_umounted()
-            sed -i '/susfs_set_current_proc_umounted/i #ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\t\t{\n\t\t\textern struct work_struct susfs_extra_works;\n\t\t\tschedule_work(\&susfs_extra_works);\n\t\t}\n#endif' "$SETUID_HOOK_C"
+            sed -i '/susfs_set_current_proc_umounted/i #ifdef CONFIG_KSU_SUSFS_SUS_PATH\n\t\t{\n\t\t\textern struct work_struct susfs_extra_works;\n\t\t\tschedule_work(\&susfs_extra_works);\n\t\t\tflush_work(\&susfs_extra_works);\n\t\t}\n#endif' "$SETUID_HOOK_C"
         fi
 
         if ! grep -q "susfs_set_current_proc_umounted" "$SETUID_HOOK_C" 2>/dev/null; then
@@ -882,6 +1017,7 @@ fix_ksu_next_susfs_umount() {
 \t\t{\
 \t\t\textern struct work_struct susfs_extra_works;\
 \t\t\tschedule_work(&susfs_extra_works);\
+\t\t\tflush_work(&susfs_extra_works);\
 \t\t}\
 #endif\
 \t\tsusfs_set_current_proc_umounted();\
@@ -922,30 +1058,255 @@ if [ -f "$SELINUX_HIDE_C" ] && grep -q "context_struct_compute_av_fn\|security_d
     # Remove the extern declarations (multi-line)
     sed -i '/^extern void context_struct_compute_av_fn/,/struct extended_perms \*xperms);/d' "$SELINUX_HIDE_C"
     sed -i '/^extern void security_dump_masked_av_fn/,/const char \*reason);/d' "$SELINUX_HIDE_C"
-    # Replace conditional context_struct_compute_av_fn call with direct call
-    sed -i '/context_struct_compute_av_fn/,+4{
-        /if (context_struct_compute_av_fn)/c\    context_struct_compute_av(policydb, scontext, tcontext, tclass, avd, NULL);
-        /context_struct_compute_av_fn(policydb/d
-        /} else {/d
-        /context_struct_compute_av(policydb/d
-        /^[[:space:]]*}$/d
+    sed -i '/if (context_struct_compute_av_fn) {/{
+        N;N;N;N
+        s/if (context_struct_compute_av_fn) {\n.*context_struct_compute_av_fn.*\n.*} else {\n.*context_struct_compute_av(.*\n.*}/context_struct_compute_av(policydb, scontext, tcontext, tclass, avd, NULL);/
     }' "$SELINUX_HIDE_C"
     # Remove security_dump_masked_av_fn conditional call (debug audit, safe to drop)
-    sed -i '/if (security_dump_masked_av_fn)/,+1d' "$SELINUX_HIDE_C"
+    sed -i '/if (security_dump_masked_av_fn)/,/masked, "bounds");/d' "$SELINUX_HIDE_C"
     echo "[SUSFS-Fixup] selinux_hide.c: Removed undefined context_struct_compute_av_fn and security_dump_masked_av_fn"
 fi
+
+# --------------------------------------------------------------------------
+# fix_dirty_sepolicy — restore full selinux_hide hooks (DirtySepolicy counter)
+# The SUSFS patch strips ALL THREE selinux_hide hooks from selinux_hide.c:
+#   1. my_write_context  — intercepts /sys/fs/selinux/context (check_context)
+#   2. my_write_access   — intercepts /sys/fs/selinux/access (compute_av)
+#   3. my_setprocattr    — intercepts /proc/self/attr/current (setcurrent)
+#
+# Duck Detector / DirtySepolicy uses all three vectors to detect root.
+# This function restores the upstream selinux_hide.c and applies only
+# the minimal SUSFS compatibility changes needed.
+# --------------------------------------------------------------------------
+fix_dirty_sepolicy() {
+    if [ ! -f "$SELINUX_HIDE_C" ]; then return; fi
+
+    # Skip if all three hooks are already present
+    if grep -q "my_write_context" "$SELINUX_HIDE_C" 2>/dev/null && \
+       grep -q "my_write_access" "$SELINUX_HIDE_C" 2>/dev/null && \
+       grep -q "my_setprocattr" "$SELINUX_HIDE_C" 2>/dev/null; then
+        echo "[SUSFS-Fixup] selinux_hide.c: All DirtySepolicy hooks already present"
+        return
+    fi
+
+    # Determine the KSU-Next source git repo
+    KSU_GIT_DIR=""
+    for candidate in \
+        "$(dirname "$0")/.root_modules/KernelSU-Next" \
+        "$(dirname "$0")/.root_modules/sukisu-ultra" \
+        "$(dirname "$0")/.root_modules/ReSukiSU"; do
+        if [ -d "$candidate/.git" ] && [ -f "$candidate/kernel/feature/selinux_hide.c" ]; then
+            KSU_GIT_DIR="$candidate"
+            break
+        fi
+    done
+    if [ -z "$KSU_GIT_DIR" ]; then
+        echo "[SUSFS-Fixup] selinux_hide.c: Cannot find KSU git repo, skipping DirtySepolicy fix"
+        return
+    fi
+
+    # Step 1: Restore upstream selinux_hide.c from git HEAD
+    echo "[SUSFS-Fixup] selinux_hide.c: Restoring upstream file from $(basename "$KSU_GIT_DIR")"
+    (cd "$KSU_GIT_DIR" && git show HEAD:kernel/feature/selinux_hide.c) > "$SELINUX_HIDE_C"
+
+    # Step 2: Make ksu_selinux_hide_running non-static (SUSFS needs it exported)
+    sed -i 's/^static bool ksu_selinux_hide_running/bool ksu_selinux_hide_running/' "$SELINUX_HIDE_C"
+
+    # Step 3: Remove undefined context_struct_compute_av_fn extern (it's static in kernel)
+    # The upstream file uses it conditionally; replace with direct call
+    if grep -q "context_struct_compute_av_fn" "$SELINUX_HIDE_C" 2>/dev/null; then
+        sed -i '/^static void (\*context_struct_compute_av_fn)/,+2d' "$SELINUX_HIDE_C"
+        sed -i '/if (context_struct_compute_av_fn)/,+4{
+            /if (context_struct_compute_av_fn)/c\    context_struct_compute_av(policydb, scontext, tcontext, tclass, avd, NULL);
+            /context_struct_compute_av_fn(policydb/d
+            /} else {/d
+            /context_struct_compute_av(policydb/d
+            /^[[:space:]]*}$/d
+        }' "$SELINUX_HIDE_C"
+    fi
+
+    # Step 4: Remove undefined security_dump_masked_av_fn extern (debug-only, safe to drop)
+    if grep -q "security_dump_masked_av_fn" "$SELINUX_HIDE_C" 2>/dev/null; then
+        sed -i '/^static void (\*security_dump_masked_av_fn)/,+1d' "$SELINUX_HIDE_C"
+        sed -i '/if (security_dump_masked_av_fn)/,/masked, "bounds");/d' "$SELINUX_HIDE_C"
+        # Remove the find_kernel_symbol_exact line for security_dump_masked_av
+        sed -i '/security_dump_masked_av_fn = find_kernel_symbol_exact/,+3d' "$SELINUX_HIDE_C"
+    fi
+
+    # Step 5: Remove find_kernel_symbol_exact for context_struct_compute_av since we removed the fn ptr
+    if grep -q "context_struct_compute_av_fn = find_kernel_symbol_exact" "$SELINUX_HIDE_C" 2>/dev/null; then
+        sed -i '/context_struct_compute_av_fn = find_kernel_symbol_exact/,+3d' "$SELINUX_HIDE_C"
+    fi
+
+    echo "[SUSFS-Fixup] selinux_hide.c: Restored ALL DirtySepolicy hooks (write_context + write_access + setprocattr)"
+}
 
 # ==========================================================================
 # Dispatch per manager
 # ==========================================================================
+# --------------------------------------------------------------------------
+# fix_backup_sepolicy_leak — prevent backup_sepolicy from being overwritten
+# --------------------------------------------------------------------------
+fix_backup_sepolicy_leak() {
+    local RULES_C="$KSU_KERNEL/selinux/rules.c"
+    [ ! -f "$RULES_C" ] && RULES_C=".root_modules/KernelSU-Next/kernel/selinux/rules.c"
+    if [ ! -f "$RULES_C" ]; then return; fi
+
+    if grep -q "if (!backup_sepolicy) {" "$RULES_C" 2>/dev/null; then
+        echo "[SUSFS-Fixup] rules.c: backup_sepolicy already guarded"
+        return
+    fi
+
+    echo "[SUSFS-Fixup] rules.c: Guarding backup_sepolicy against dirty overwrites"
+
+    python3 -c "
+import sys
+import re
+
+with open('$RULES_C', 'r') as f:
+    content = f.read()
+
+pattern = r'(backup_sepolicy =\s+ksu_dup_sepolicy\(rcu_dereference_protected\(old_pol, lockdep_is_held\(&selinux_state\.policy_mutex\)\)\);.*?(?:pr_info\(\"backup sepolicy success!\\\\n\"\);|pr_info\(\"backup sepolicy success! latest_granting=%d\\\\n\", backup_sepolicy->latest_granting\);).*?\}\s*\n\s*\})'
+
+def repl(m):
+    block = m.group(1)
+    indented = '\n'.join('    ' + line if line.strip() else line for line in block.split('\n'))
+    return 'if (!backup_sepolicy) {\n' + indented + '\n    }'
+
+new_content = re.sub(pattern, repl, content, flags=re.DOTALL)
+with open('$RULES_C', 'w') as f:
+    f.write(new_content)
+"
+}
+
+# --------------------------------------------------------------------------
+# fix_dirty_sepolicy_seqno — fix Seqno split in DirtySepolicy (Duck Detector)
+# --------------------------------------------------------------------------
+fix_dirty_sepolicy_seqno() {
+    local RULES_C="$KSU_KERNEL/selinux/rules.c"
+    local HIDE_C="$KSU_KERNEL/feature/selinux_hide.c"
+
+    [ ! -f "$RULES_C" ] && RULES_C=".root_modules/KernelSU-Next/kernel/selinux/rules.c"
+    [ ! -f "$HIDE_C" ] && HIDE_C=".root_modules/KernelSU-Next/kernel/feature/selinux_hide.c"
+
+    if [ ! -f "$RULES_C" ] || [ ! -f "$HIDE_C" ]; then return; fi
+
+    if grep -q "status->policyload" "$HIDE_C" 2>/dev/null && grep -q "status->policyload" "$RULES_C" 2>/dev/null; then
+        echo "[SUSFS-Fixup] selinux_hide.c and rules.c: seqno split already fixed"
+        return
+    fi
+
+    echo "[SUSFS-Fixup] Guarding against DirtySepolicy Seqno Split (Duck Detector)"
+
+    python3 -c "
+import sys
+import re
+
+def fix_rules_c(filepath):
+    with open(filepath, 'r') as f:
+        content = f.read()
+
+    # Comment out selinux_status_update_policyload to prevent sequence increment and status page allocation
+    content = re.sub(r'(selinux_status_update_policyload\([^)]*\);)', r'// \g<1>', content)
+
+    with open(filepath, 'w') as f:
+        f.write(content)
+
+def fix_hide_c(filepath):
+    with open(filepath, 'r') as f:
+        content = f.read()
+    
+    if 'status->policyload' in content:
+        return
+
+    pattern = r'(length = scnprintf\(buf, SIMPLE_TRANSACTION_LIMIT, \"%x %x %x %x %u %x\", avd\.allowed, 0xffffffff, avd\.auditallow,\s*avd\.auditdeny, avd\.seqno, avd\.flags\);)'
+
+    def repl(m):
+        return \"\"\"
+    {
+        struct page *spage = selinux_kernel_status_page();
+        if (spage) {
+            struct selinux_kernel_status *status = page_address(spage);
+            if (status->policyload > 0) {
+                avd.seqno = status->policyload;
+            }
+        }
+    }
+    \"\"\" + m.group(1)
+
+    content = re.sub(pattern, repl, content)
+    with open(filepath, 'w') as f:
+        f.write(content)
+
+fix_rules_c('$RULES_C')
+fix_hide_c('$HIDE_C')
+"
+}
+
+# ==========================================================================
+# [SHARED] fix_app_zygote_bypass — Allow app_zygote in KernelSU
+# ==========================================================================
+fix_app_zygote_bypass() {
+    local SELINUX_C="$KSU_KERNEL/selinux/selinux.c"
+    local SELINUX_H="$KSU_KERNEL/selinux/selinux.h"
+    local ALLOWLIST_H="$KSU_KERNEL/policy/allowlist.h"
+    
+    # Patch allowlist.h to support app_zygote isolated UIDs
+    if [ -f "$ALLOWLIST_H" ]; then
+        if ! grep -q "FIRST_APP_ZYGOTE_ISOLATED_UID" "$ALLOWLIST_H" 2>/dev/null; then
+            echo "[SUSFS-Fixup] Patching allowlist.h to support app_zygote isolated UIDs"
+            sed -i '/#define FIRST_ISOLATED_UID/i #define FIRST_APP_ZYGOTE_ISOLATED_UID 90000\n#define LAST_APP_ZYGOTE_ISOLATED_UID 98999' "$ALLOWLIST_H"
+            sed -i 's/return appid >= FIRST_ISOLATED_UID && appid <= LAST_ISOLATED_UID;/return (appid >= FIRST_ISOLATED_UID \&\& appid <= LAST_ISOLATED_UID) || (appid >= FIRST_APP_ZYGOTE_ISOLATED_UID \&\& appid <= LAST_APP_ZYGOTE_ISOLATED_UID);/g' "$ALLOWLIST_H"
+        else
+            echo "[SUSFS-Fixup] allowlist.h: app_zygote isolated UID range already fixed"
+        fi
+    fi
+
+    if [ ! -f "$SELINUX_C" ] || [ ! -f "$SELINUX_H" ]; then return; fi
+
+    if grep -q "APP_ZYGOTE_CONTEXT" "$SELINUX_H" 2>/dev/null; then
+        echo "[SUSFS-Fixup] selinux.c: app_zygote bypass already fixed"
+        return
+    fi
+
+    echo "[SUSFS-Fixup] Patching selinux to support app_zygote for isolated services"
+
+    # Add APP_ZYGOTE_CONTEXT to selinux.h
+    sed -i '/#define ZYGOTE_CONTEXT/a #define APP_ZYGOTE_CONTEXT "u:r:app_zygote:s0"' "$SELINUX_H"
+
+    # Add cached_app_zygote_sid to selinux.c
+    sed -i '/static u32 cached_zygote_sid/a static u32 cached_app_zygote_sid __read_mostly = 0;' "$SELINUX_C"
+
+    # Cache the sid
+    sed -i '/err = security_secctx_to_secid(ZYGOTE_CONTEXT/i \
+\terr = security_secctx_to_secid(APP_ZYGOTE_CONTEXT, strlen(APP_ZYGOTE_CONTEXT), \&cached_app_zygote_sid);\
+\tif (err) {\
+\t\tpr_warn("Failed to cache app_zygote SID: %d\\n", err);\
+\t\tcached_app_zygote_sid = 0;\
+\t} else {\
+\t\tpr_info("Cached app_zygote SID: %u\\n", cached_app_zygote_sid);\
+\t}\
+' "$SELINUX_C"
+
+    # Modify is_zygote to also return true for app_zygote
+    sed -i 's/return is_sid_match(cred, cached_zygote_sid, ZYGOTE_CONTEXT);/return is_sid_match(cred, cached_zygote_sid, ZYGOTE_CONTEXT) || is_sid_match(cred, cached_app_zygote_sid, APP_ZYGOTE_CONTEXT);/g' "$SELINUX_C"
+}
+
 case "$MANAGER" in
-    sukisu|mambosu)
+    resukisu|sukisu|yukisu|mambosu)
         fix_sulog_type_mismatch
         fix_execveat_handlers
+        if [ "$MANAGER" = "yukisu" ]; then
+            fix_yukisu_adb_root
+        fi
         # Both use KernelSU-Next hooking architecture
         fix_ksu_next_kbuild
         fix_ksu_next_bridge
         fix_ksu_next_ksud
+        fix_dirty_sepolicy
+        fix_dirty_sepolicy_seqno
+        fix_backup_sepolicy_leak
+        fix_app_zygote_bypass
         # If it still has kprobe supercall, fix it, otherwise use next's
         if [ -f "$SUPERCALL_C" ] && grep -q "reboot_handler_pre" "$SUPERCALL_C" 2>/dev/null; then
             fix_kprobe_supercall
@@ -975,6 +1336,10 @@ SULOG_EXECVE_EOF
         fi
         
         fix_ksu_late_loaded
+        fix_dirty_sepolicy
+        fix_dirty_sepolicy_seqno
+        fix_backup_sepolicy_leak
+        fix_app_zygote_bypass
         ;;
     ksu-next)
         fix_ksu_next_kbuild
@@ -983,6 +1348,50 @@ SULOG_EXECVE_EOF
         fix_ksu_next_ksud
         fix_execveat_handlers
         fix_ksu_next_susfs_umount
+        fix_dirty_sepolicy
+        fix_dirty_sepolicy_seqno
+        fix_backup_sepolicy_leak
+        fix_app_zygote_bypass
+        # Fix adb_root call signature mismatch in syscall_event_bridge.c
+        if [ -f "$BRIDGE_C" ] && grep -q 'ksu_adb_root_handle_execve((struct pt_regs \*)regs)' "$BRIDGE_C" 2>/dev/null; then
+            sed -i 's|ksu_adb_root_handle_execve((struct pt_regs \*)regs)|ksu_adb_root_handle_execve((const char *)PT_REGS_PARM1(regs), (void __user ***)\&PT_REGS_PARM3(regs))|' "$BRIDGE_C"
+            echo "[SUSFS-Fixup] syscall_event_bridge.c: Fixed adb_root call signature"
+        fi
+        ;;
+    ksu)
+        echo "[SUSFS-Fixup] Applying fixes for standard KernelSU ($MANAGER)..."
+        fix_sulog_type_mismatch
+        
+        # Standard KSU doesn't use Next's bridge renames, but we still need adb_root fix
+        if [ -f "$BRIDGE_C" ] && grep -q 'ksu_adb_root_handle_execve((struct pt_regs \*)regs)' "$BRIDGE_C" 2>/dev/null; then
+            sed -i 's|ksu_adb_root_handle_execve((struct pt_regs \*)regs)|ksu_adb_root_handle_execve((const char *)PT_REGS_PARM1(regs), (void __user ***)\&PT_REGS_PARM3(regs))|' "$BRIDGE_C"
+            echo "[SUSFS-Fixup] syscall_event_bridge.c: Fixed adb_root call signature"
+        fi
+        
+        # Standard KSU removed ksu_sulog_capture_root_execve, we need to restore it
+        if [ -f "$SULOG_EVENT_C" ] && ! grep -q "ksu_sulog_capture_root_execve" "$SULOG_EVENT_C" 2>/dev/null; then
+            cat >> "$SULOG_EVENT_C" << 'SULOG_EXECVE_EOF'
+
+struct ksu_sulog_pending_event *ksu_sulog_capture_root_execve(const char __user *filename_user,
+                                                              const char __user *const __user *argv_user, gfp_t gfp)
+{
+    struct user_arg_ptr _argv_wrap = { .ptr.native = argv_user };
+    return ksu_sulog_capture(KSU_SULOG_EVENT_ROOT_EXECVE, filename_user, &_argv_wrap, gfp);
+}
+SULOG_EXECVE_EOF
+            echo "[SUSFS-Fixup] sulog/event.c: Restored ksu_sulog_capture_root_execve"
+        fi
+        if [ -f "$SULOG_EVENT_H" ] && ! grep -q "ksu_sulog_capture_root_execve" "$SULOG_EVENT_H" 2>/dev/null; then
+            sed -i '/ksu_sulog_capture_sucompat/i struct ksu_sulog_pending_event *ksu_sulog_capture_root_execve(const char __user *filename_user, const char __user *const __user *argv_user, gfp_t gfp);' "$SULOG_EVENT_H"
+        fi
+        
+        # Standard KSU handles sucompat in execveat now, so we bypass the old hook
+        if [ -f "$BRIDGE_C" ]; then
+            sed -i 's|ret = ksu_handle_execve_sucompat(filename_user, orig_nr, regs);|ret = 0; // bypassed|g' "$BRIDGE_C"
+            echo "[SUSFS-Fixup] syscall_event_bridge.c: Bypassed deprecated ksu_handle_execve_sucompat"
+        fi
+        
+        fix_app_zygote_bypass
         ;;
     *)
         echo "[SUSFS-Fixup] Unknown manager '$MANAGER' — applying best-effort fixes"
@@ -996,7 +1405,17 @@ SULOG_EXECVE_EOF
             fix_ksu_next_supercall
             fix_ksu_next_ksud
         fi
+        fix_app_zygote_bypass
+        # Fix adb_root call signature mismatch in syscall_event_bridge.c (for latest official ksu)
+        if [ -f "$BRIDGE_C" ] && grep -q 'ksu_adb_root_handle_execve((struct pt_regs \*)regs)' "$BRIDGE_C" 2>/dev/null; then
+            sed -i 's|ksu_adb_root_handle_execve((struct pt_regs \*)regs)|ksu_adb_root_handle_execve((const char *)PT_REGS_PARM1(regs), (void __user ***)\&PT_REGS_PARM3(regs))|' "$BRIDGE_C"
+            echo "[SUSFS-Fixup] syscall_event_bridge.c: Fixed adb_root call signature"
+        fi
         ;;
 esac
 
 echo "[SUSFS-Fixup] All compatibility fixups applied for $MANAGER!"
+
+# --------------------------------------------------------------------------
+# fix_backup_sepolicy_leak — prevent backup_sepolicy from being overwritten
+# --------------------------------------------------------------------------

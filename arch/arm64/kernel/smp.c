@@ -879,7 +879,13 @@ static void do_handle_IPI(int ipinr)
 		break;
 
 	case IPI_CPU_STOP:
-		trace_android_vh_ipi_stop(get_irq_regs());
+		/* 
+		 * Disabled trace_android_vh_ipi_stop() because the Qualcomm minidump
+		 * module crashes (NULL pointer deref at 0x9) if this IPI is received 
+		 * while the CPU is in cpuidle (deep sleep). Disabling this hook allows 
+		 * clean system reboot/shutdown without getting a black screen hang.
+		 */
+		// trace_android_vh_ipi_stop(get_irq_regs());
 		local_cpu_stop();
 		break;
 

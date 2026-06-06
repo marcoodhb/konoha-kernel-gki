@@ -31,6 +31,7 @@ on:
           - ksu
           - ksu-next
           - sukisu
+          - yukisu
           - resukisu
           - mambosu
           - apatch
@@ -60,6 +61,14 @@ on:
           - "off"
           - "on"
         default: "on"
+      droidspaces:
+        description: "Droidspaces Support"
+        required: true
+        type: choice
+        options:
+          - "off"
+          - "on"
+        default: "off"
       htsr:
         description: "HTSR 240Hz Touch Sampling"
         required: true
@@ -92,6 +101,14 @@ on:
           - "off"
           - "on"
         default: "on"
+      debug:
+        description: "Debug Mode (nokaslr, no optimizations)"
+        required: true
+        type: choice
+        options:
+          - "off"
+          - "on"
+        default: "off"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -111,10 +128,12 @@ jobs:
           INPUT_KPM: ${{ inputs.kpm }}
           INPUT_HARDENED: ${{ inputs.hardened }}
           INPUT_BYPASS: ${{ inputs.bypasscharging }}
+          INPUT_DROIDSPACES: ${{ inputs.droidspaces }}
           INPUT_HTSR: ${{ inputs.htsr }}
           INPUT_WIFI: ${{ inputs.wifi_exploit }}
           INPUT_KGSL: ${{ inputs.kgsl_exploit }}
           INPUT_DATA: ${{ inputs.data_exploit }}
+          INPUT_DEBUG: ${{ inputs.debug }}
         run: |
           if [ "$INPUT_HZ" == "powersave" ]; then HZ_ID=100
           elif [ "$INPUT_HZ" == "balance" ]; then HZ_ID=250
@@ -140,10 +159,12 @@ jobs:
           fi
           if [ "$INPUT_HARDENED" == "on" ]; then BUILD_NAME="${BUILD_NAME}-hardened"; fi
           if [ "$INPUT_BYPASS" == "on" ]; then BUILD_NAME="${BUILD_NAME}-bypasscharging"; fi
+          if [ "$INPUT_DROIDSPACES" == "on" ]; then BUILD_NAME="${BUILD_NAME}-droidspaces"; fi
           if [ "$INPUT_HTSR" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nohtsr"; fi
           if [ "$INPUT_WIFI" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nowifi"; fi
           if [ "$INPUT_KGSL" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nokgsl"; fi
           if [ "$INPUT_DATA" == "off" ]; then BUILD_NAME="${BUILD_NAME}-nodata"; fi
+          if [ "$INPUT_DEBUG" == "on" ]; then BUILD_NAME="${BUILD_NAME}-debug"; fi
           
           echo "BUILD_NAME=$BUILD_NAME" >> $GITHUB_ENV
           
@@ -205,6 +226,8 @@ jobs:
           INPUT_KGSL: ${{ inputs.kgsl_exploit }}
           INPUT_DATA: ${{ inputs.data_exploit }}
           INPUT_BYPASS: ${{ inputs.bypasscharging }}
+          INPUT_DROIDSPACES: ${{ inputs.droidspaces }}
+          INPUT_DEBUG: ${{ inputs.debug }}
         run: |
           cd gki-clo
           chmod +x build.sh
@@ -233,10 +256,12 @@ jobs:
             kpm_patch="$KPM_PATCH" \
             hardened="$INPUT_HARDENED" \
             bypasscharging="$INPUT_BYPASS" \
+            droidspaces="$INPUT_DROIDSPACES" \
             htsr="$INPUT_HTSR" \
             wifi_exploit="$INPUT_WIFI" \
             kgsl_exploit="$INPUT_KGSL" \
             data_exploit="$INPUT_DATA" \
+            debug="$INPUT_DEBUG" \
             lto="$LTO_VAL"
 
       - name: Upload Artifact
@@ -281,10 +306,12 @@ jobs:
             | Feature | Status |
             |---------|--------|
             | Bypass Charging | **${{ inputs.bypasscharging }}** |
+            | Droidspaces | **${{ inputs.droidspaces }}** |
             | HTSR 240Hz Touch | **${{ inputs.htsr }}** |
             | WiFi Exploits | **${{ inputs.wifi_exploit }}** |
             | KGSL GPU Bypass | **${{ inputs.kgsl_exploit }}** |
             | Data Exploits | **${{ inputs.data_exploit }}** |
+            | Debug Mode | **${{ inputs.debug }}** |
             
             Commit: ${{ github.sha }}
             Ref: ${{ github.ref }}
