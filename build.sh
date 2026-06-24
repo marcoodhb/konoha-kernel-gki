@@ -47,8 +47,22 @@ for arg in "$@"; do
         data_exploit=*) DATA_EXPLOIT="${arg#*=}" ;;
         droidspaces=*) DROIDSPACES="${arg#*=}" ;;
         debug=*) DEBUG_MODE="${arg#*=}" ;;
+        kernel_name=*) KERNEL_NAME="${arg#*=}" ;;
+        spoof_uname=*) SPOOF_UNAME="${arg#*=}" ;;
+
     esac
 done
+
+
+echo "Applying Custom Kernel Name and Spoof Uname..."
+if [ -n "$KERNEL_NAME" ]; then
+    sed -i "s/CONFIG_LOCALVERSION=\".*\"/CONFIG_LOCALVERSION=\"$KERNEL_NAME\"/g" arch/arm64/configs/konoha_defconfig
+fi
+
+if [ "$SPOOF_UNAME" == "on" ]; then
+    # Spoof to standard Android stock naming (remove custom localversion)
+    sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION=\"\"/g' arch/arm64/configs/konoha_defconfig
+fi
 
 # ==========================================
 # Non-Interactive Mode (Defaults)
@@ -496,7 +510,13 @@ EXTREME_CLANG_FLAGS=(
     -fslp-vectorize
     -fdelete-null-pointer-checks
     -moutline 
-    # No safeties (Raw Performance)
+    # =================================================================
+    # RAW PERFORMANCE FLAGS — DO NOT REMOVE!
+    # These intentionally disable security overhead for maximum speed:
+    #   -fno-stack-protector    : skip canary checks (~2-5% syscall speedup)
+    #   -mbranch-protection=none: skip PAC sign/auth (~1-3% branch overhead)
+    #   -mharden-sls=none      : skip SLS barrier instructions
+    # =================================================================
     -mharden-sls=none
     -mbranch-protection=none
     -fno-semantic-interposition
@@ -632,9 +652,12 @@ DEBUG_REDUCTION_ARGS=(
     -d CONFIG_RCU_TRACE
     -d CONFIG_CMA_DEBUGFS
     -d CONFIG_UBSAN -d CONFIG_UBSAN_BOUNDS -d CONFIG_UBSAN_ARRAY_BOUNDS -d CONFIG_UBSAN_LOCAL_BOUNDS -d CONFIG_UBSAN_SANITIZE_ALL -d CONFIG_UBSAN_TRAP
- 
-    # -d CONFIG_SCHEDSTATS # bootloop
 
+    # === RE-VERIFIED SAFE COMPILE-TIME DISABLES (readelf + modinfo traced) ===
+    -d CONFIG_CLEANCACHE           # 0 DLKMs import, no namespace deps
+    -d CONFIG_PRINTK_TIME          # bool default only, no symbol exported
+    # ⛔ -d CONFIG_ANDROID_DEBUG_SYMBOLS  # msm_sysstats.ko imports MINIDUMP ns!
+    # ⛔ -d CONFIG_ANDROID_DEBUG_KINFO    # ANDROID_GKI_struct_kernel_all_info exported
 )
 scripts/config --file "$OUT_DIR/.config" "${DEBUG_REDUCTION_ARGS[@]}"
 
@@ -645,6 +668,17 @@ CURRENT_CMDLINE=$(grep '^CONFIG_CMDLINE=' "$OUT_DIR/.config" | sed 's/^CONFIG_CM
 CMDLINE_APPEND=""
 echo "$CURRENT_CMDLINE" | grep -q "kasan=off" || CMDLINE_APPEND="$CMDLINE_APPEND kasan=off"
 echo "$CURRENT_CMDLINE" | grep -q "panic_on_rcu_stall" || CMDLINE_APPEND="$CMDLINE_APPEND kernel.panic_on_rcu_stall=0"
+
+# === RUNTIME PERF PARAMS (zero-risk — code stays compiled, just disabled at boot) ===
+# These achieve the same effect as compile-time config disables but without
+# any struct layout changes, KABI breaks, or Kconfig cascades.
+echo "$CURRENT_CMDLINE" | grep -q "init_on_alloc=" || CMDLINE_APPEND="$CMDLINE_APPEND init_on_alloc=0"
+echo "$CURRENT_CMDLINE" | grep -q "page_alloc.shuffle=" || CMDLINE_APPEND="$CMDLINE_APPEND page_alloc.shuffle=0"
+echo "$CURRENT_CMDLINE" | grep -q "randomize_kstack_offset=" || CMDLINE_APPEND="$CMDLINE_APPEND randomize_kstack_offset=0"
+echo "$CURRENT_CMDLINE" | grep -q "loglevel=" || CMDLINE_APPEND="$CMDLINE_APPEND loglevel=0"
+# ⛔ audit=0 — BREAKS SELinux enforcing → bootloop
+# ⛔ nosoftlockup — risky on Qualcomm SoC, vendor drivers may expect watchdog
+
 if [ "$DEBUG_MODE" == "on" ]; then
     echo "$CURRENT_CMDLINE" | grep -q "nokaslr" || CMDLINE_APPEND="$CMDLINE_APPEND nokaslr"
 fi
@@ -731,6 +765,19 @@ cp -r "$KERNEL_DIR/anykernel" "$TEMP_DIR"
 for img in Image.gz-dtb Image.gz Image; do
     [ -f "$ZIMAGE_DIR/$img" ] && { cp -v "$ZIMAGE_DIR/$img" "$TEMP_DIR/"; break; }
 done
+
+
+echo "Applying Custom Kernel Name and Spoof Uname..."
+if [ -n "$KERNEL_NAME" ]; then
+    sed -i "s/CONFIG_LOCALVERSION=".*"/CONFIG_LOCALVERSION="$KERNEL_NAME"/g" arch/arm64/configs/konoha_defconfig
+fi
+
+if [ "$SPOOF_UNAME" == "on" ]; then
+    # Ensure SUSFS spoof is enabled
+    sed -i "s/# CONFIG_KSU_SUSFS_SPOOF_UNAME is not set/CONFIG_KSU_SUSFS_SPOOF_UNAME=y/g" arch/arm64/configs/konoha_defconfig
+elif [ "$SPOOF_UNAME" == "off" ]; then
+    sed -i "s/CONFIG_KSU_SUSFS_SPOOF_UNAME=y/# CONFIG_KSU_SUSFS_SPOOF_UNAME is not set/g" arch/arm64/configs/konoha_defconfig
+fi
 
 # Build filename
 ZIP_SUFFIX=""

@@ -3,6 +3,19 @@ name: Build Kernel CI (Custom Variant)
 on:
   workflow_dispatch:
     inputs:
+      kernel_name:
+        description: "Custom Kernel Name (LOCALVERSION)"
+        required: true
+        type: string
+        default: "-Kono-Ha-Kernel"
+      spoof_uname:
+        description: "Spoof Uname (SUSFS/Stock Naming)"
+        required: true
+        type: choice
+        options:
+          - "off"
+          - "on"
+        default: "on"
       hz:
         description: 'Refresh Rate (HZ)'
         required: true
@@ -110,6 +123,7 @@ on:
           - "on"
         default: "off"
 
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -134,6 +148,8 @@ jobs:
           INPUT_KGSL: ${{ inputs.kgsl_exploit }}
           INPUT_DATA: ${{ inputs.data_exploit }}
           INPUT_DEBUG: ${{ inputs.debug }}
+          INPUT_KERNEL_NAME: ${{ inputs.kernel_name }}
+          INPUT_SPOOF_UNAME: ${{ inputs.spoof_uname }}
         run: |
           if [ "$INPUT_HZ" == "powersave" ]; then HZ_ID=100
           elif [ "$INPUT_HZ" == "balance" ]; then HZ_ID=250
@@ -228,6 +244,8 @@ jobs:
           INPUT_BYPASS: ${{ inputs.bypasscharging }}
           INPUT_DROIDSPACES: ${{ inputs.droidspaces }}
           INPUT_DEBUG: ${{ inputs.debug }}
+          INPUT_KERNEL_NAME: ${{ inputs.kernel_name }}
+          INPUT_SPOOF_UNAME: ${{ inputs.spoof_uname }}
         run: |
           cd gki-clo
           chmod +x build.sh
@@ -262,6 +280,8 @@ jobs:
             kgsl_exploit="$INPUT_KGSL" \
             data_exploit="$INPUT_DATA" \
             debug="$INPUT_DEBUG" \
+            kernel_name="$INPUT_KERNEL_NAME" \
+            spoof_uname="$INPUT_SPOOF_UNAME" \
             lto="$LTO_VAL"
 
       - name: Upload Artifact
