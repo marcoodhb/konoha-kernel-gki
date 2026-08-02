@@ -217,6 +217,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}-${{ github.sha }}
-          name: Build ${{ github.sha }}
+          name: ${{ github.event_name == 'schedule' && format('Daily Build {0}', github.sha) || format('Release {0}', github.sha) }}
           body_path: release_body.md
+          prerelease: ${{ github.event_name == 'schedule' }}
           files: release_assets/*

@@ -120,6 +120,30 @@ fi
 if [ -f "$(dirname "$0")/fs/susfs.c" ]; then
     sed -i 's/static void susfs_run_sus_path_loop(void)/void susfs_run_sus_path_loop(void)/g' "$(dirname "$0")/fs/susfs.c"
     echo "[SUSFS-Fixup] fs/susfs.c: Made susfs_run_sus_path_loop non-static"
+
+    SUSFS_C="$(dirname "$0")/fs/susfs.c"
+    if ! grep -q "susfs_open_redirect_spoof_show_map_vma(" "$SUSFS_C" 2>/dev/null; then
+        sed -i '/#endif \/\/ #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT/i \
+\
+int susfs_open_redirect_spoof_show_map_vma(struct inode *inode, unsigned long *out_ino, dev_t *out_dev, char *spoofed_name) {\
+	struct st_susfs_open_redirect_hlist *entry = NULL;\
+	int srcu_idx = srcu_read_lock(\&susfs_srcu_open_redirect);\
+\
+	hash_for_each_possible_rcu(OPEN_REDIRECT_HLIST, entry, node, inode->i_ino) {\
+		if (entry->reversed_lookup_only \&\& entry->target_dev == inode->i_sb->s_dev) {\
+			*out_ino = entry->redirected_ino;\
+			*out_dev = entry->redirected_dev;\
+			if (spoofed_name)\
+				strscpy(spoofed_name, entry->info.redirected_pathname, SUSFS_MAX_LEN_PATHNAME - 1);\
+			srcu_read_unlock(\&susfs_srcu_open_redirect, srcu_idx);\
+			return 0;\
+		}\
+	}\
+	srcu_read_unlock(\&susfs_srcu_open_redirect, srcu_idx);\
+	return -EINVAL;\
+}' "$SUSFS_C"
+        echo "[SUSFS-Fixup] fs/susfs.c: Added missing susfs_open_redirect_spoof_show_map_vma"
+    fi
 fi
 
 # ==========================================================================
