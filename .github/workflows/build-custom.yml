@@ -256,7 +256,7 @@ jobs:
         if: ${{ inputs.nomount == 'on' }}
         run: |
           echo "Fetching NoMount from maxsteeel repository..."
-          git clone --depth=1 https://github.com/maxsteeel/nomount.git /tmp/nomount
+          git clone --depth=1 -b dev https://github.com/maxsteeel/nomount.git /tmp/nomount
           cd gki-clo
           
           KERNEL_VERSION=$(grep -E '^(VERSION|PATCHLEVEL)\s*=' Makefile | awk -F'=' '{print $2}' | tr -d ' ' | paste -sd '.' -)
