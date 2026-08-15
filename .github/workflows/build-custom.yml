@@ -232,19 +232,13 @@ jobs:
       - name: Download Clang Toolchain
         run: |
           mkdir -p toolchains/clang
-          URL=$(curl -s https://api.github.com/repos/ZyCromerZ/Clang/releases | python3 -c "
-          import sys, json
-          for r in json.load(sys.stdin):
-              if '23.0' in r['tag_name']:
-                  for a in r['assets']:
-                      if a['name'].endswith('.tar.gz'):
-                          print(a['browser_download_url'])
-                          exit()
-          ")
-          echo "Toolchain: $URL"
-          curl -L "$URL" -o toolchains/clang.tar.gz
-          tar -xzf toolchains/clang.tar.gz -C toolchains/clang
-          rm toolchains/clang.tar.gz
+          ASSET_URL=$(curl -sf https://api.github.com/repos/Neutron-Toolchains/clang-build-catalogue/releases/latest \
+            | jq -r '.assets[] | select(.name | endswith(".tar.zst")) | .browser_download_url')
+
+          echo "Toolchain: $ASSET_URL"
+          curl -Lf "$ASSET_URL" -o toolchains/clang.tar.zst
+          tar --zstd -xf toolchains/clang.tar.zst -C toolchains/clang --strip-components=1
+          rm toolchains/clang.tar.zst
           toolchains/clang/bin/clang --version
 
       - name: Setup AnyKernel3
